@@ -20,7 +20,13 @@ enum Action {
     List,
     /// Interactivly open a serial port
     #[clap(alias="i")]
-    Interactive,
+    Interactive {
+        /// The serial port to open
+        port: String,
+        /// The baud rate to use
+        #[clap(short, long, default_value="9600")]
+        baud: u32,
+    },
 }
 
 #[tokio::main]
@@ -34,9 +40,9 @@ async fn main() -> Result<()> {
         Action::List => {
            list_ports()?;
         }
-        Action::Interactive => {
+        Action::Interactive { port, baud } => {
             println!("Interactive mode");
-            interactive_mode().await?;
+            interactive_mode(port).await?;
         }
     }
 
@@ -200,7 +206,6 @@ async fn monitor(stream: &mut tokio_serial::SerialStream) -> Result<()> {
                         }
                         if let Event::Key(key_event) = event {
                             if let Some(key) = handle_key_event(key_event)? {
-                                // serial_writer.unbounded_send(key).unwrap();
                                 serial_sink.send(key).await?;
                             }
                         } else {
@@ -237,8 +242,8 @@ async fn monitor(stream: &mut tokio_serial::SerialStream) -> Result<()> {
     Ok(())
 }
 
-async fn interactive_mode() -> Result<()> {
-    let mut port = tokio_serial::new("/dev/ttyS0", 9600).open_native_async()?;
+async fn interactive_mode(port: String) -> Result<()> {
+    let mut port = tokio_serial::new(port, 9600).open_native_async()?;
 
     // allowing multiple intances to connect at once, will "load balance" the incomming traffic. which is not what we want
     // #[cfg(unix)]

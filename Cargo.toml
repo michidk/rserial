@@ -17,7 +17,7 @@ mio-serial = "5.0.3"
 serialport = "4.2.0"
 # strum = { version = "0.24.1", features = ["derive"] }
 thiserror = "1.0.37"
-tokio = { version = "1.22.0", features = ["macros", "rt", "rt-multi-thread", "io-util"] }
+tokio = { version = "1.22.0", features = ["macros", "rt-multi-thread", "io-util"] }
 tokio-serial = { version = "5.4.4", features = ["libudev"] }
 tokio-util = { version = "0.7.4", features = ["codec"] }
 tui = "0.19.0"
