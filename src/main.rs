@@ -75,6 +75,7 @@ impl Command for Statusbar {
             SetBackgroundColor(Color::Blue),
             SetForegroundColor(Color::White),
             Print(format!("{:<l$}{:>r$}", left_text, right_text, l = w - (left_length + right_length), r = right_length)),
+            ResetColor,
         );
 
         Ok(())
@@ -94,7 +95,7 @@ struct FancyTerm<W: std::io::Write> {
 
 impl<W: std::io::Write> FancyTerm<W> {
     pub fn new(mut write: W) -> Result<Self> {
-        let (_, height) = terminal::size()?;
+        let (width, height) = terminal::size()?;
 
         // clear
         for _ in 0..height.saturating_sub(1u16) {
@@ -105,8 +106,8 @@ impl<W: std::io::Write> FancyTerm<W> {
         execute!(
             write,
             // SavePosition,
-            MoveTo(0, 0),
-            SetMargin(1, height - 1),
+            MoveTo(0,0),
+            SetMargin(2, height - 1),
             // RestorePosition,
             // MoveUp(1)
             MoveTo(0, 1),
@@ -123,10 +124,12 @@ impl<W: std::io::Write> FancyTerm<W> {
 
         execute!(
             self.write,
+            // print text
             SavePosition,
             Print(text),
             RestorePosition,
             Print("\n"),
+            // render statusbars
             SavePosition,
             MoveTo(0, 0),
             Statusbar(width, "top".to_string()),
