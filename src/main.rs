@@ -1,17 +1,16 @@
+use std::borrow::Cow;
 use std::fmt::{self, Display};
-use std::io::Write;
 use std::ops::Sub;
 use std::{io::stdout, thread::sleep, time::Duration};
 
 use color_eyre::eyre::{eyre, Result};
 use crossterm::style::SetBackgroundColor;
-use crossterm::{csi, cursor::*, queue, Command, QueueableCommand, execute};
+use crossterm::{csi, cursor::*, execute, queue, Command, QueueableCommand};
 use crossterm::{
     style::*,
     terminal::{self, Clear, ClearType},
 };
 use unicode_width::UnicodeWidthStr;
-
 
 // queue commands inside a command
 macro_rules! queuec {
@@ -19,7 +18,6 @@ macro_rules! queuec {
         $($command.write_ansi($f)?;)*
     }}
 }
-
 
 // inspired by esp-rs/espflash
 struct RawModeGuard;
@@ -56,33 +54,92 @@ impl Display for SetMargin {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TermSize(u16, u16);
+
+impl TermSize {
+    pub fn width(&self) -> u16 {
+        self.0
+    }
+    pub fn height(&self) -> u16 {
+        self.1
+    }
+}
+
+impl From<(u16, u16)> for TermSize {
+    fn from((width, height): (u16, u16)) -> Self {
+        Self(width, height)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Position {
+    Top,
+    Bottom,
+}
+
+impl Position {
+    fn to_command(&self, TermSize(_, height): &TermSize) -> MoveTo {
+        match self {
+            Self::Top => MoveTo(0, 0),
+            Self::Bottom => MoveTo(0, *height),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Statusbar(u16, String);
+pub struct Statusbar<'a>(&'a TermSize, Position, Cow<'a, str>);
 
-impl Command for Statusbar {
+impl<'a> Statusbar<'a> {
+    pub fn new(term_size: &'a TermSize, position: Position, text: impl Into<Cow<'a, str>>) -> Self {
+        Self(term_size, position, text.into())
+    }
+
+    pub fn top(term_size: &'a TermSize, text: impl Into<Cow<'a, str>>) -> Self {
+        Self::new(term_size, Position::Top, text.into())
+    }
+
+    pub fn bottom(term_size: &'a TermSize, text: impl Into<Cow<'a, str>>) -> Self {
+        Self::new(term_size, Position::Bottom, text.into())
+    }
+}
+
+impl Command for Statusbar<'_> {
     fn write_ansi(&self, f: &mut impl fmt::Write) -> fmt::Result {
+        let w = self.0.width() as usize;
+        let position = &self.1;
 
-        let w = self.0 as usize;
-
-        let left_text = self.1.clone();
+        let left_text = &self.2;
         let right_text = "this is a long text  ";
 
-        let left_length = UnicodeWidthStr::width(left_text.as_str());
+        let left_length = UnicodeWidthStr::width(left_text.as_ref());
         let right_length = UnicodeWidthStr::width(right_text);
+
+        let margin_left = w - (left_length + right_length);
+        let margin_right = right_length;
 
         queuec!(
             f,
+            SavePosition,
+            position.to_command(self.0),
             SetBackgroundColor(Color::Blue),
             SetForegroundColor(Color::White),
-            Print(format!("{:<l$}{:>r$}", left_text, right_text, l = w - (left_length + right_length), r = right_length)),
+            Print(format!(
+                "{:<l$}{:>r$}",
+                left_text,
+                right_text,
+                l = margin_left,
+                r = margin_right
+            )),
             ResetColor,
+            RestorePosition,
         );
 
         Ok(())
     }
 }
 
-impl Display for Statusbar {
+impl Display for Statusbar<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.write_ansi(f)
     }
@@ -106,7 +163,7 @@ impl<W: std::io::Write> FancyTerm<W> {
         execute!(
             write,
             // SavePosition,
-            MoveTo(0,0),
+            MoveTo(0, 0),
             SetMargin(2, height - 1),
             // RestorePosition,
             // MoveUp(1)
@@ -120,7 +177,7 @@ impl<W: std::io::Write> FancyTerm<W> {
     }
 
     pub fn write(&mut self, text: String) -> Result<()> {
-        let (width, height) = terminal::size()?;
+        let term_size = terminal::size()?.into();
 
         execute!(
             self.write,
@@ -130,12 +187,8 @@ impl<W: std::io::Write> FancyTerm<W> {
             RestorePosition,
             Print("\n"),
             // render statusbars
-            SavePosition,
-            MoveTo(0, 0),
-            Statusbar(width, "top".to_string()),
-            MoveTo(0, height),
-            Statusbar(width, "bottom".to_string()),
-            RestorePosition
+            Statusbar::top(&term_size, "top"),
+            Statusbar::bottom(&term_size, "bottom"),
         )?;
         Ok(())
     }
