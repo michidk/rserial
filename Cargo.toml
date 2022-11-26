@@ -10,11 +10,15 @@ bytes = "1.2.1"
 clap = { version = "4.0.26", features = ["derive"] }
 color-eyre = "0.6.2"
 crossterm = { version = "0.25.0", features = ["event-stream"] }
+cursive = { version = "0.20.0", features = ["crossterm-backend", "maplit", "term_size"], default-features = false }
 env_logger = "0.9.3"
 futures = "0.3.25"
 log = "0.4.17"
+maplit = { version = "1.0.2", default-features = false }
 mio-serial = "5.0.3"
+ringbuffer = "0.10.0"
 serialport = "4.2.0"
+term_size = { version = "0.3.2", default-features = false }
 # strum = { version = "0.24.1", features = ["derive"] }
 thiserror = "1.0.37"
 tokio = { version = "1.22.0", features = ["macros", "rt-multi-thread", "io-util"] }

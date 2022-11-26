@@ -1,235 +1,172 @@
-use std::borrow::Cow;
-use std::fmt::{self, Display};
-use std::ops::Sub;
-use std::{io::stdout, thread::sleep, time::Duration};
+use std::sync::Mutex;
 
-use color_eyre::eyre::{eyre, Result};
-use crossterm::style::SetBackgroundColor;
-use crossterm::{csi, cursor::*, execute, queue, Command, QueueableCommand};
-use crossterm::{
-    style::*,
-    terminal::{self, Clear, ClearType},
+use cursive::{
+    direction::Orientation,
+    menu,
+    view::{Nameable, Resizable, ScrollStrategy, Scrollable},
+    views::{Dialog, FixedLayout, Layer, OnLayoutView, ScrollView, TextView, TextContentRef, TextContent},
+    Printer, Rect, Vec2, View, event::Key, utils::span::SpannedString, theme::Style, Cursive,
 };
-use unicode_width::UnicodeWidthStr;
 
-// queue commands inside a command
-macro_rules! queuec {
-    ($f:expr $(, $command:expr)* $(,)?) => {{
-        $($command.write_ansi($f)?;)*
-    }}
+use ringbuffer::{ConstGenericRingBuffer, RingBuffer, RingBufferExt, RingBufferWrite};
+
+// static buffer : ConstGenericRingBuffer<&str, 2> = ConstGenericRingBuffer::<_, 2>::new();
+const BUFFER_SIZE: usize = 64;
+
+struct ScrollableBufferView {
+    buffer: Mutex<ConstGenericRingBuffer<String, BUFFER_SIZE>>,
 }
 
-// inspired by esp-rs/espflash
-struct RawModeGuard;
+impl View for ScrollableBufferView {
+    fn draw(&self, printer: &Printer<'_, '_>) {
+        let mut buffer = self.buffer.lock().unwrap();
+        let start = buffer.len().saturating_sub(printer.size.y);
 
-impl RawModeGuard {
-    pub fn new() -> Result<Self> {
-        crossterm::terminal::enable_raw_mode()?;
-        Ok(RawModeGuard)
-    }
-}
-
-impl Drop for RawModeGuard {
-    fn drop(&mut self) {
-        if let Err(e) = crossterm::terminal::disable_raw_mode() {
-            eprintln!("Failed to disable raw mode: {}", e);
+        // for i in 0..
+        let mut y = 0;
+        for i in start..buffer.len() {
+            let i = i as isize;
+            let line = buffer.get(i).unwrap();
+            printer.print_line(Orientation::Horizontal, (0, y), line.len(), line);
+            y += 1;
         }
+        // while let Some(line) = buffer.get_absolute(start + y) {
+        //     printer.print_line(Orientation::Horizontal, (0, y), line.len(), line.as_str());
+        //     y += 1;
+        //     // start += 1;
+        //     // println!("test {}", start);
+        // }
+    }
+
+    fn required_size(&mut self, constraint: Vec2) -> Vec2 {
+        Vec2::new(constraint.x, self.buffer.lock().unwrap().len())
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SetMargin(pub u16, pub u16);
-
-impl Command for SetMargin {
-    fn write_ansi(&self, f: &mut impl fmt::Write) -> fmt::Result {
-        // set scroll region (this will place the cursor in the top left)
-        // sets the first line of content and the last line of content
-        write!(f, csi!("{};{}r"), self.0, self.1)
-    }
+pub trait StatusBarExt {
+    fn status_bar(&mut self, content: impl Into<SpannedString<Style>>) -> TextContent;
+    fn get_status_bar_content(&mut self) -> TextContentRef;
+    fn set_status_bar_content(&mut self, content: impl Into<SpannedString<Style>>);
 }
 
-impl Display for SetMargin {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.write_ansi(f)
-    }
-}
+impl StatusBarExt for Cursive {
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TermSize(u16, u16);
-
-impl TermSize {
-    pub fn width(&self) -> u16 {
-        self.0
-    }
-    pub fn height(&self) -> u16 {
-        self.1
-    }
-}
-
-impl From<(u16, u16)> for TermSize {
-    fn from((width, height): (u16, u16)) -> Self {
-        Self(width, height)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Position {
-    Top,
-    Bottom,
-}
-
-impl Position {
-    fn to_command(&self, TermSize(_, height): &TermSize) -> MoveTo {
-        match self {
-            Self::Top => MoveTo(0, 0),
-            Self::Bottom => MoveTo(0, *height),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Statusbar<'a>(&'a TermSize, Position, Cow<'a, str>);
-
-impl<'a> Statusbar<'a> {
-    pub fn new(term_size: &'a TermSize, position: Position, text: impl Into<Cow<'a, str>>) -> Self {
-        Self(term_size, position, text.into())
-    }
-
-    pub fn top(term_size: &'a TermSize, text: impl Into<Cow<'a, str>>) -> Self {
-        Self::new(term_size, Position::Top, text.into())
-    }
-
-    pub fn bottom(term_size: &'a TermSize, text: impl Into<Cow<'a, str>>) -> Self {
-        Self::new(term_size, Position::Bottom, text.into())
-    }
-}
-
-impl Command for Statusbar<'_> {
-    fn write_ansi(&self, f: &mut impl fmt::Write) -> fmt::Result {
-        let w = self.0.width() as usize;
-        let position = &self.1;
-
-        let left_text = &self.2;
-        let right_text = "this is a long text  ";
-
-        let left_length = UnicodeWidthStr::width(left_text.as_ref());
-        let right_length = UnicodeWidthStr::width(right_text);
-
-        let margin_left = w - (left_length + right_length);
-        let margin_right = right_length;
-
-        queuec!(
-            f,
-            SavePosition,
-            position.to_command(self.0),
-            SetBackgroundColor(Color::Blue),
-            SetForegroundColor(Color::White),
-            Print(format!(
-                "{:<l$}{:>r$}",
-                left_text,
-                right_text,
-                l = margin_left,
-                r = margin_right
-            )),
-            ResetColor,
-            RestorePosition,
+    /// Create a new status bar, set to the given content.
+    fn status_bar(&mut self, content: impl Into<SpannedString<Style>>) -> TextContent {
+        let text_content = TextContent::new(content);
+        self.screen_mut()
+        .add_transparent_layer(
+            OnLayoutView::new(
+                FixedLayout::new().child(
+                    Rect::from_point(Vec2::zero()),
+                    Layer::new(
+                        TextView::new_with_content(text_content.clone()).with_name("status"),
+                    )
+                    .full_width(),
+                ),
+                |layout, size| {
+                    let rect = Rect::from_size((0, size.y - 1), (size.x, 1));
+                    layout.set_child_position(0, rect);
+                    layout.layout(size);
+                },
+            )
+            .full_screen(),
         );
-
-        Ok(())
+        text_content
     }
-}
 
-impl Display for Statusbar<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.write_ansi(f)
-    }
-}
-
-struct FancyTerm<W: std::io::Write> {
-    write: W,
-    original_height: u16,
-}
-
-impl<W: std::io::Write> FancyTerm<W> {
-    pub fn new(mut write: W) -> Result<Self> {
-        let (width, height) = terminal::size()?;
-
-        // clear
-        for _ in 0..height.saturating_sub(1u16) {
-            queue!(write, Print("\n"))?;
-        }
-        write.flush()?;
-
-        execute!(
-            write,
-            // SavePosition,
-            MoveTo(0, 0),
-            SetMargin(2, height - 1),
-            // RestorePosition,
-            // MoveUp(1)
-            MoveTo(0, 1),
-        )?;
-
-        Ok(Self {
-            write,
-            original_height: height,
+    fn get_status_bar_content(&mut self) -> TextContentRef {
+        self.call_on_name("status", |text_view: &mut TextView| {
+            text_view.get_content()
         })
+        .expect("get_status")
     }
 
-    pub fn write(&mut self, text: String) -> Result<()> {
-        let term_size = terminal::size()?.into();
-
-        execute!(
-            self.write,
-            // print text
-            SavePosition,
-            Print(text),
-            RestorePosition,
-            Print("\n"),
-            // render statusbars
-            Statusbar::top(&term_size, "top"),
-            Statusbar::bottom(&term_size, "bottom"),
-        )?;
-        Ok(())
+    fn set_status_bar_content(&mut self, content: impl Into<SpannedString<Style>>) {
+        self.call_on_name("status", |text_view: &mut TextView| {
+            text_view.set_content(content);
+        })
+        .expect("set_status")
     }
 
-    fn clear(&mut self) -> Result<()> {
-        let (_, height) = terminal::size()?;
-        execute!(
-            self.write,
-            SavePosition,
-            SetMargin(0, height),
-            // delete top statusbar
-            MoveTo(0, 0),
-            Clear(ClearType::CurrentLine),
-            // delete bottom statusbar
-            MoveTo(0, self.original_height),
-            Clear(ClearType::CurrentLine),
-            RestorePosition,
-            ResetColor,
-        )?;
-        Ok(())
-    }
 }
 
-impl<W: std::io::Write> Drop for FancyTerm<W> {
-    fn drop(&mut self) {
-        self.clear().expect("Cannot clear terminal");
+fn main() {
+    let mut buffer = ConstGenericRingBuffer::<String, BUFFER_SIZE>::new();
+    buffer.push("Hello".to_string());
+    buffer.push("World".to_string());
+    for i in 0..100 {
+        buffer.push(format!("test {}", i));
     }
-}
+    buffer.push("Hello".to_string());
+    buffer.push("World".to_string());
 
-fn main() -> Result<()> {
-    let _raw_mode = RawModeGuard::new()?;
+    // Creates the cursive root - required for every application.
+    let mut siv = cursive::crossterm();
 
-    let mut out = stdout();
-    let mut _term = FancyTerm::new(&mut out)?;
+    siv.add_global_callback('q', |s| s.quit());
 
-    // let mut stdoutt = stdout();
-
-    for i in 0..30 {
-        sleep(Duration::from_millis(150));
-        _term.write(format!("test: {}", i))?;
+    let view = ScrollableBufferView {
+        buffer: Mutex::new(buffer),
     }
+    .scrollable()
+    .scroll_y(true)
+    .scroll_x(false)
+    .scroll_strategy(ScrollStrategy::StickToBottom);
+    // siv.add_layer(view.fixed_height(20));
+    // siv.add_layer(
+    // DialogAround::new(
+    //     Dialog::around(view)
+    //         .title("ScrollableBufferView")
+    //         .button("Quit", |s| s.quit())
+    //         .fixed_size(size),
+    // )
+    // );
 
-    Ok(())
+    // siv.screen_mut().add_transparent_layer(
+    //     OnLayoutView::new(
+    //         FixedLayout::new().child(
+    //             Rect::from_point(Vec2::zero()),
+    //             Layer::new(TextView::new("Status: unknown").with_name("status")).full_width(),
+    //         ),
+    //         |layout, size| {
+    //             // We could also keep the status bar at the top instead.
+    //             layout.set_child_position(0, Rect::from_size((0, size.y - 1), (size.x, 1)));
+    //             layout.layout(size);
+    //         },
+    //     )
+    //     .full_screen(),
+    // );
+    let height = siv.screen_size().y;
+    println!("height {}", height);
+    siv.add_layer(TextView::new("test").full_width().fixed_height(height - 1));
+    siv.status_bar("test");
+
+
+    // siv.add_layer(view);
+    // siv.menubar().
+    //     .add_subtree(
+    //         "Help",
+    //         menu::Tree::new()
+    //             .subtree(
+    //                 "Help",
+    //                 menu::Tree::new()
+    //                     .leaf("General", |s| s.add_layer(Dialog::info("Help message!")))
+    //                     .leaf("Online", |s| {
+    //                         let text = "Google it yourself!\n\
+    //                                     Kids, these days...";
+    //                         s.add_layer(Dialog::info(text))
+    //                     }),
+    //             )
+    //             .leaf("About", |s| s.add_layer(Dialog::info("Cursive v0.0.0"))),
+    //     )
+    //     .add_delimiter()
+    //     .add_leaf("Quit", |s| s.quit());
+
+    // siv.add_global_callback(Key::Esc, |s| s.select_menubar());
+
+    // siv.add_layer(Dialog::text("Hit <Esc> to show the menu!"));
+
+    // Starts the event loop.
+    siv.run();
 }
