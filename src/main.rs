@@ -1,13 +1,13 @@
 use std::sync::Mutex;
 
 use cursive::views::ScrollView;
-use cursive::{CursiveExt, CursiveRunnable};
+use cursive::{CursiveRunnable};
 use cursive::traits::With;
 use cursive::{
     direction::Orientation,
     event::Event,
     theme::{Palette, Theme},
-    view::{Resizable, ScrollStrategy, Scrollable},
+    view::{Resizable, ScrollStrategy},
     views::{LinearLayout, TextView},
     Cursive, Printer, Vec2, View,
 };
