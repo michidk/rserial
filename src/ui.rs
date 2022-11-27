@@ -1,12 +1,10 @@
-use std::ops::Deref;
-use std::sync::{Mutex, Arc};
-
 use bytes::Bytes;
-use cursive::event::Key;
-use cursive::view::Nameable;
-use cursive::views::{ScrollView, EditView};
-use cursive::{CursiveRunnable, CursiveExt};
+use color_eyre::eyre::{eyre, Result};
+use crossbeam_channel::Receiver;
+use cursive::event::{Key, EventResult};
 use cursive::traits::With;
+use cursive::view::Nameable;
+use cursive::views::{EditView, ScrollView};
 use cursive::{
     direction::Orientation,
     event::Event,
@@ -15,21 +13,18 @@ use cursive::{
     views::{LinearLayout, TextView},
     Cursive, Printer, Vec2, View,
 };
-use tokio::sync::mpsc::Receiver;
-use tokio::task;
+use cursive::{CursiveExt, CursiveRunnable};
 use ringbuffer::{ConstGenericRingBuffer, RingBuffer, RingBufferExt, RingBufferWrite};
-use color_eyre::eyre::{eyre, Result};
-
+use std::sync::{Arc, Mutex};
+use std::thread;
 
 struct BufferView<const CAP: usize> {
-    pub buffer: Arc<Mutex<ConstGenericRingBuffer<String, CAP>>>,
+    pub buffer: Arc<Mutex<ConstGenericRingBuffer<Bytes, CAP>>>,
 }
 
 impl<const CAP: usize> BufferView<CAP> {
-    pub fn new(buffer: Arc<Mutex<ConstGenericRingBuffer<String, CAP>>>) -> Self {
-        BufferView {
-            buffer,
-        }
+    pub fn new(buffer: Arc<Mutex<ConstGenericRingBuffer<Bytes, CAP>>>) -> Self {
+        BufferView { buffer }
     }
 
     pub fn scrollable(self) -> ScrollView<Self> {
@@ -47,6 +42,7 @@ impl<const CAP: usize> View for BufferView<CAP> {
 
         for y in start..buffer.len() {
             let line = buffer.get(y as isize).unwrap();
+            let line = std::str::from_utf8(line).unwrap();
             printer.print_line(Orientation::Horizontal, (0, y), line.len(), line);
         }
     }
@@ -58,25 +54,58 @@ impl<const CAP: usize> View for BufferView<CAP> {
 
 const BUFFER_SIZE: usize = 64;
 
-pub async fn start(buffer: Arc<Mutex<ConstGenericRingBuffer<String, BUFFER_SIZE>>>) -> Result<()> {
-    buffer.lock().unwrap().push(
-        ansi_term::Colour::Red
+pub fn start(rx: Receiver<Bytes>) -> Result<()> {
+    // RC would be enough here?
+    let buffer = Arc::new(Mutex::new(
+        ConstGenericRingBuffer::<Bytes, BUFFER_SIZE>::new(),
+    ));
+
+    let text = ansi_term::Colour::Red
             .bold()
-            .paint("Press CTRL+c to exit.")
-            .to_string(),
+            .paint("Press CTRL+c to exit.");
+    let text = text.as_bytes();
+    buffer.lock().unwrap().push(
+        Bytes::copy_from_slice(text)
     );
-    let mut console = cursive::crossterm().use_custom_theme().install_exit_callback();
+    let mut console = cursive::crossterm()
+        .use_custom_theme()
+        .install_exit_callback();
 
     let sbv = BufferView::new(buffer.clone()).scrollable();
 
+    let buffer_clone = buffer.clone();
     console.add_layer(
         LinearLayout::vertical()
             .child(sbv.full_screen().with_name("buffer"))
             .child(EditView::new().on_submit(move |_, text| {
-                buffer.lock().unwrap().push(text.to_string());
+                let bytes = Bytes::copy_from_slice(text.as_bytes());
+                buffer_clone.clone().lock().unwrap().push(bytes);
             }))
             .child(TextView::new("testetesehnte").full_width()),
     );
+
+    let cb_sink = console.cb_sink().clone();
+    thread::spawn(move || loop {
+        while let Ok(bytes) = rx.recv() {
+            buffer.lock().unwrap().push(bytes);
+
+            // TODO: make error handling more readable
+            match cb_sink.send(Box::new(|s: &mut Cursive| {
+                match s.call_on_name("buffer", |v: &mut ScrollView<BufferView<BUFFER_SIZE>>| {
+                    match v.on_event(Event::Refresh) {
+                        EventResult::Consumed(_) => {},
+                        EventResult::Ignored => log::error!("Error refreshing view: {}", v.type_name()),
+                    }
+                }) {
+                    Some(_) => {},
+                    None => log::error!("Error refreshing view: buffer"),
+                }
+            })) {
+                Ok(_) => {},
+                Err(e) => log::error!("Error refreshing view: {}", e),
+            }
+        }
+    });
 
     console.run_crossterm()?;
     Ok(())

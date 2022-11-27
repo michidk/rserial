@@ -1,16 +1,12 @@
 mod ui;
 mod serial;
 
-use bytes::{BytesMut, Bytes};
+use bytes::Bytes;
 use color_eyre::eyre::{eyre, Result};
 use clap::{command, Parser, Subcommand};
-use crossterm::event::{EventStream, KeyCode, Event, KeyEvent, KeyModifiers};
-use futures::{StreamExt, FutureExt, select, SinkExt};
 use ringbuffer::ConstGenericRingBuffer;
-use tokio::{task, sync::mpsc::{self, Sender, Receiver}};
-use tokio_serial::{SerialPortType, SerialPortBuilderExt};
-use tokio_util::codec::{Decoder, Encoder, BytesCodec};
-use std::{env, io::{self, Write}, str, sync::{Arc, Mutex}};
+use std::{str, sync::{Arc, Mutex}, thread};
+use crossbeam_channel::{Sender, Receiver};
 
 #[derive(Debug, Parser)]
 struct Args {
@@ -43,16 +39,18 @@ enum Action {
 }
 
 
-const BUFFER_SIZE: usize = 64;
+// trait SerialConsumer {
+//     f);
+// }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+
+fn main() -> Result<()> {
     color_eyre::install()?;
     env_logger::init();
 
     let args = Args::parse();
 
-    let (tx, rx): (Sender<Bytes>, Receiver<Bytes>) = mpsc::channel(32);
+    let (tx, rx): (Sender<Bytes>, Receiver<Bytes>) = crossbeam_channel::unbounded();
 
     match args.subcommand {
         Action::List => {
@@ -60,12 +58,11 @@ async fn main() -> Result<()> {
         }
         Action::Interactive { port, baud } => {
 
-            let mut buffer = Arc::new(Mutex::new(ConstGenericRingBuffer::<String, BUFFER_SIZE>::new()));
+            // let mut buffer = Arc::new(Mutex::new(ConstGenericRingBuffer::<String, BUFFER_SIZE>::new()));
 
-            // println!("Interactive mode");
-            serial::interactive(port, buffer.clone()).await?;
-            // task::spawn_blocking(ui::start(rx)).await.unwrap();
-            ui::start(buffer).await?;
+            println!("Interactive mode");
+            serial::interactive(port, baud, tx);
+            ui::start(rx)?;
 
         }
         Action::Raw { port, baud } => {

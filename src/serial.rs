@@ -1,22 +1,12 @@
+use std::{thread, time::Duration, io::{BufReader, Read}};
+
 use bytes::{Bytes, BytesMut};
-use clap::{command, Parser, Subcommand};
 use color_eyre::eyre::{eyre, Result};
-use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyModifiers};
-use futures::{select, FutureExt, SinkExt, Stream, StreamExt};
-use ringbuffer::{ConstGenericRingBuffer, RingBufferWrite};
-use std::{
-    borrow::Borrow,
-    env,
-    io::{self, Write},
-    str,
-    sync::{Arc, Mutex},
-};
-use tokio::{io::ReadHalf, task};
-use tokio_serial::{SerialPortBuilderExt, SerialPortType, SerialStream};
-use tokio_util::codec::{BytesCodec, Decoder, Encoder, FramedRead};
+use crossbeam_channel::{Receiver, Sender};
+use serialport::SerialPortType;
 
 pub fn list_ports() -> Result<()> {
-    match tokio_serial::available_ports() {
+    match serialport::available_ports() {
         Ok(ports) => {
             match ports.len() {
                 0 => println!("No ports found."),
@@ -41,7 +31,6 @@ pub fn list_ports() -> Result<()> {
                             "           Product: {}",
                             info.product.as_ref().map_or("", String::as_str)
                         );
-                        // waiting for the serialport 4.2.0 release (https://github.com/serialport/serialport-rs/issues/57)
                         // println!(
                         //     "         Interface: {}",
                         //     info.interface
@@ -131,67 +120,38 @@ pub fn list_ports() -> Result<()> {
 //     }
 // }
 
-const BUFFER_SIZE: usize = 64;
+pub fn interactive(port: String, baud_rate: u32, sender: Sender<Bytes>) {
+    let port = serialport::new(port, baud_rate)
+        .timeout(Duration::from_millis(10))
+        .open()
+        .expect("Failed to open serial port.");
 
-async fn monitor(
-    stream: &mut tokio_serial::SerialStream,
-    buffer: Arc<Mutex<ConstGenericRingBuffer<String, BUFFER_SIZE>>>,
-) -> Result<()> {
-    task::spawn(run(stream, buffer)).await?;
-    Ok(())
-}
-
-async fn run(
-    stream: &mut tokio_serial::SerialStream,
-    buffer: Arc<Mutex<ConstGenericRingBuffer<String, BUFFER_SIZE>>>,
-) {
-    let (rx_stream, tx_stream) = tokio::io::split(stream);
-        // TODO: writo own decoder similar to https://github.com/dhylands/serial-monitor/blob/master/src/string_decoder.rs to insert replacement characters
-    let mut serial_reader = tokio_util::codec::FramedRead::new(rx_stream, BytesCodec::new());
-    loop {
-        match serial_reader.next().await {
-            Some(Ok(serial_event)) => {
-                // println!("Serial Event:{:?}\r", serial_event);
-                let bytes = serial_event.freeze();
-                // tx.send(bytes).await?;
-                let str = String::from_utf8_lossy(&bytes);
-                let mut buffer = buffer.lock().unwrap();
-                buffer.push(str.to_string());
-                // let mut buffer = buffer.lock().
-                // print!("{}", serial_event);
-                // std::io::stdout().flush()?;
-            }
-            Some(Err(e)) => {
-                println!("Serial Error: {:?}\r", e);
-                // This most likely means that the serial port has been unplugged.
-                break;
-            }
-            None => {
-                println!("maybe_serial returned None\r");
-                break;
-            }
-        }
-    }
-}
-
-pub async fn interactive(
-    port: String,
-    buffer: Arc<Mutex<ConstGenericRingBuffer<String, BUFFER_SIZE>>>,
-) -> Result<()> {
-    let mut port = tokio_serial::new(port, 9600).open_native_async()?;
-
-    // allowing multiple intances to connect at once, will "load balance" the incoming traffic. which is not what we want
     // #[cfg(unix)]
     // port.set_exclusive(false)
-    //     .expect("Unable to set serial port exclusive to false");
+        // .expect("Unable to set serial port exclusive to false");
 
-    let result = monitor(&mut port, buffer).await;
-    // let mut reader = LineCodec.framed(port);
-
-    // while let Some(line_result) = reader.next().await {
-    //     let line = line_result.expect("Failed to read line");
-    //     println!("{}", line);
-    // }
-
-    Ok(())
+    thread::spawn(move || {
+            // let mut bytes = BytesMut::with_capacity(1024);
+            let mut bytes = [0u8; 1024];
+            let mut buf = BufReader::with_capacity(1024, port);
+            loop {
+                match buf.read(&mut bytes) {
+                    Ok(0) => {
+                        // println!("No data");
+                        break;
+                    }
+                    Ok(n) => {
+                        // println!("Read {} bytes", n);
+                        // let data = bytes.split_to(n);
+                        // sender.send(data.freeze()).unwrap();
+                        sender.send(Bytes::copy_from_slice(&bytes[0..n])).unwrap();
+                    }
+                    Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => {}
+                    Err(e) => {
+                        eprintln!("Error: {}", e);
+                        break;
+                    }
+                }
+            }
+    });
 }
