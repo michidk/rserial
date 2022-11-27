@@ -10,3 +10,9 @@ rename to cereal monitor
 
 https://gist.github.com/fnky/458719343aabd01cfb17a3a4f7296797
 https://mdk.fr/blog/how-apt-does-its-fancy-progress-bar.html
+https://github.com/dhylands/serial-monitor
+https://github.com/serialport/serialport-rs
+
+# current state
+also try out async again
+- non utf8 characters (like new line) crash everything

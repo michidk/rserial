@@ -2,10 +2,9 @@ mod ui;
 mod serial;
 
 use bytes::Bytes;
-use color_eyre::eyre::{eyre, Result};
+use color_eyre::eyre::{Result};
 use clap::{command, Parser, Subcommand};
-use ringbuffer::ConstGenericRingBuffer;
-use std::{str, sync::{Arc, Mutex}, thread};
+use std::{str};
 use crossbeam_channel::{Sender, Receiver};
 
 #[derive(Debug, Parser)]
@@ -39,18 +38,14 @@ enum Action {
 }
 
 
-// trait SerialConsumer {
-//     f);
-// }
-
-
 fn main() -> Result<()> {
     color_eyre::install()?;
     env_logger::init();
 
     let args = Args::parse();
 
-    let (tx, rx): (Sender<Bytes>, Receiver<Bytes>) = crossbeam_channel::unbounded();
+    let (messages_tx, messages_rx): (Sender<Bytes>, Receiver<Bytes>) = crossbeam_channel::unbounded();
+    let (commands_tx, commands_rx): (Sender<Bytes>, Receiver<Bytes>) = crossbeam_channel::unbounded();
 
     match args.subcommand {
         Action::List => {
@@ -61,8 +56,8 @@ fn main() -> Result<()> {
             // let mut buffer = Arc::new(Mutex::new(ConstGenericRingBuffer::<String, BUFFER_SIZE>::new()));
 
             println!("Interactive mode");
-            serial::interactive(port, baud, tx);
-            ui::start(rx)?;
+            serial::interactive(port, baud, messages_tx, commands_rx);
+            ui::start(messages_rx, commands_tx)?;
 
         }
         Action::Raw { port, baud } => {

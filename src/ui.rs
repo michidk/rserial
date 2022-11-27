@@ -1,10 +1,10 @@
 use bytes::Bytes;
 use color_eyre::eyre::{eyre, Result};
-use crossbeam_channel::Receiver;
-use cursive::event::{Key, EventResult};
+use crossbeam_channel::{Receiver, Sender};
+use cursive::event::{EventResult, Key};
 use cursive::traits::With;
 use cursive::view::Nameable;
-use cursive::views::{EditView, ScrollView};
+use cursive::views::{EditView, ScrollView, TextContent};
 use cursive::{
     direction::Orientation,
     event::Event,
@@ -15,6 +15,8 @@ use cursive::{
 };
 use cursive::{CursiveExt, CursiveRunnable};
 use ringbuffer::{ConstGenericRingBuffer, RingBuffer, RingBufferExt, RingBufferWrite};
+use std::borrow::BorrowMut;
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -54,19 +56,16 @@ impl<const CAP: usize> View for BufferView<CAP> {
 
 const BUFFER_SIZE: usize = 64;
 
-pub fn start(rx: Receiver<Bytes>) -> Result<()> {
+pub fn start(rx: Receiver<Bytes>, tx: Sender<Bytes>) -> Result<()> {
     // RC would be enough here?
     let buffer = Arc::new(Mutex::new(
         ConstGenericRingBuffer::<Bytes, BUFFER_SIZE>::new(),
     ));
 
-    let text = ansi_term::Colour::Red
-            .bold()
-            .paint("Press CTRL+c to exit.");
+    // TODO: apparently the style is lost when transmitting the bytes over a channel
+    let text = ansi_term::Colour::Red.bold().paint("Press CTRL+c to exit.");
     let text = text.as_bytes();
-    buffer.lock().unwrap().push(
-        Bytes::copy_from_slice(text)
-    );
+    buffer.lock().unwrap().push(Bytes::copy_from_slice(text));
     let mut console = cursive::crossterm()
         .use_custom_theme()
         .install_exit_callback();
@@ -74,13 +73,19 @@ pub fn start(rx: Receiver<Bytes>) -> Result<()> {
     let sbv = BufferView::new(buffer.clone()).scrollable();
 
     let buffer_clone = buffer.clone();
+
+    let mut command_line = EditView::new();
+    command_line = command_line.on_submit_mut(move |cursive, text| {
+        let bytes = Bytes::copy_from_slice((format!("{}\n", text)).as_bytes());
+        buffer_clone.clone().lock().unwrap().push(bytes.clone());
+        tx.send(bytes).expect("Could not send bytes to channel");
+        cursive.call_on_name("command_line", |v: &mut EditView| v.set_content(""));
+    });
+
     console.add_layer(
         LinearLayout::vertical()
             .child(sbv.full_screen().with_name("buffer"))
-            .child(EditView::new().on_submit(move |_, text| {
-                let bytes = Bytes::copy_from_slice(text.as_bytes());
-                buffer_clone.clone().lock().unwrap().push(bytes);
-            }))
+            .child(command_line.with_name("command_line"))
             .child(TextView::new("testetesehnte").full_width()),
     );
 
@@ -91,17 +96,20 @@ pub fn start(rx: Receiver<Bytes>) -> Result<()> {
 
             // TODO: make error handling more readable
             match cb_sink.send(Box::new(|s: &mut Cursive| {
-                match s.call_on_name("buffer", |v: &mut ScrollView<BufferView<BUFFER_SIZE>>| {
-                    match v.on_event(Event::Refresh) {
-                        EventResult::Consumed(_) => {},
-                        EventResult::Ignored => log::error!("Error refreshing view: {}", v.type_name()),
-                    }
-                }) {
-                    Some(_) => {},
+                match s.call_on_name(
+                    "buffer",
+                    |v: &mut ScrollView<BufferView<BUFFER_SIZE>>| match v.on_event(Event::Refresh) {
+                        EventResult::Consumed(_) => {}
+                        EventResult::Ignored => {
+                            log::error!("Error refreshing view: {}", v.type_name())
+                        }
+                    },
+                ) {
+                    Some(_) => {}
                     None => log::error!("Error refreshing view: buffer"),
                 }
             })) {
-                Ok(_) => {},
+                Ok(_) => {}
                 Err(e) => log::error!("Error refreshing view: {}", e),
             }
         }

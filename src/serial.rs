@@ -1,8 +1,12 @@
-use std::{thread, time::Duration, io::{BufReader, Read}};
+use std::{
+    io::{BufReader, Read},
+    thread,
+    time::Duration,
+};
 
-use bytes::{Bytes, BytesMut};
-use color_eyre::eyre::{eyre, Result};
-use crossbeam_channel::{Receiver, Sender};
+use bytes::Bytes;
+use color_eyre::eyre::Result;
+use crossbeam_channel::{select, Receiver, Sender};
 use serialport::SerialPortType;
 
 pub fn list_ports() -> Result<()> {
@@ -120,38 +124,46 @@ pub fn list_ports() -> Result<()> {
 //     }
 // }
 
-pub fn interactive(port: String, baud_rate: u32, sender: Sender<Bytes>) {
+pub fn interactive(port: String, baud_rate: u32, tx: Sender<Bytes>, rx: Receiver<Bytes>) {
     let port = serialport::new(port, baud_rate)
         .timeout(Duration::from_millis(10))
         .open()
         .expect("Failed to open serial port.");
 
-    // #[cfg(unix)]
-    // port.set_exclusive(false)
-        // .expect("Unable to set serial port exclusive to false");
-
+    let mut clone = port.try_clone().expect("Failed to clone");
     thread::spawn(move || {
-            // let mut bytes = BytesMut::with_capacity(1024);
-            let mut bytes = [0u8; 1024];
-            let mut buf = BufReader::with_capacity(1024, port);
-            loop {
-                match buf.read(&mut bytes) {
-                    Ok(0) => {
-                        // println!("No data");
-                        break;
-                    }
-                    Ok(n) => {
-                        // println!("Read {} bytes", n);
-                        // let data = bytes.split_to(n);
-                        // sender.send(data.freeze()).unwrap();
-                        sender.send(Bytes::copy_from_slice(&bytes[0..n])).unwrap();
-                    }
-                    Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => {}
-                    Err(e) => {
-                        eprintln!("Error: {}", e);
-                        break;
-                    }
+        // the hack? why does this not working???
+        // let mut bytes = BytesMut::with_capacity(1024);
+
+        let mut bytes = [0u8; 1024];
+        let mut buf = BufReader::with_capacity(1024, port);
+        loop {
+            // read serial port
+            match buf.read(&mut bytes) {
+                Ok(0) => {
+                    // println!("No data");
+                    break;
+                }
+                Ok(n) => {
+                    // println!("Read {} bytes", n);
+                    // let data = bytes.split_to(n);
+                    // sender.send(data.freeze()).unwrap();
+                    tx.send(Bytes::copy_from_slice(&bytes[0..n])).unwrap();
+                }
+                Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => {}
+                Err(e) => {
+                    eprintln!("Error: {}", e);
+                    break;
                 }
             }
+        }
+    });
+
+    // do we need this extra thread? async would be waaay nicer
+    thread::spawn(move || {
+        // write serial port
+        while let Ok(bytes) = rx.recv() {
+            clone.write_all(&bytes).unwrap();
+        }
     });
 }
