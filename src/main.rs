@@ -1,111 +1,77 @@
-use std::sync::Mutex;
+mod ui;
+mod serial;
 
-use cursive::views::ScrollView;
-use cursive::{CursiveRunnable};
-use cursive::traits::With;
-use cursive::{
-    direction::Orientation,
-    event::Event,
-    theme::{Palette, Theme},
-    view::{Resizable, ScrollStrategy},
-    views::{LinearLayout, TextView},
-    Cursive, Printer, Vec2, View,
-};
+use bytes::{BytesMut, Bytes};
+use color_eyre::eyre::{eyre, Result};
+use clap::{command, Parser, Subcommand};
+use crossterm::event::{EventStream, KeyCode, Event, KeyEvent, KeyModifiers};
+use futures::{StreamExt, FutureExt, select, SinkExt};
+use ringbuffer::ConstGenericRingBuffer;
+use tokio::{task, sync::mpsc::{self, Sender, Receiver}};
+use tokio_serial::{SerialPortType, SerialPortBuilderExt};
+use tokio_util::codec::{Decoder, Encoder, BytesCodec};
+use std::{env, io::{self, Write}, str, sync::{Arc, Mutex}};
 
-use ringbuffer::{ConstGenericRingBuffer, RingBuffer, RingBufferExt, RingBufferWrite};
+#[derive(Debug, Parser)]
+struct Args {
+    #[command(subcommand)]
+    subcommand: Action,
+}
+
+#[derive(Debug, Subcommand)]
+enum Action {
+    /// List the available serial ports
+    #[clap(alias="l")]
+    List,
+    /// Interactivly open a serial port
+    #[clap(alias="i")]
+    Interactive {
+        /// The serial port to open
+        port: String,
+        /// The baud rate to use
+        #[clap(short, long, default_value="9600")]
+        baud: u32,
+    },
+    #[clap(alias="r")]
+    Raw {
+        /// The serial port to open
+        port: String,
+        /// The baud rate to use
+        #[clap(short, long, default_value="9600")]
+        baud: u32,
+    }
+}
+
 
 const BUFFER_SIZE: usize = 64;
 
-struct BufferView<const CAP: usize> {
-    buffer: Mutex<ConstGenericRingBuffer<String, CAP>>,
-}
+#[tokio::main]
+async fn main() -> Result<()> {
+    color_eyre::install()?;
+    env_logger::init();
 
-impl<const CAP: usize> BufferView<CAP> {
-    pub fn new(buffer: ConstGenericRingBuffer<String, CAP>) -> Self {
-        BufferView {
-            buffer: Mutex::new(buffer),
+    let args = Args::parse();
+
+    let (tx, rx): (Sender<Bytes>, Receiver<Bytes>) = mpsc::channel(32);
+
+    match args.subcommand {
+        Action::List => {
+            serial::list_ports()?;
+        }
+        Action::Interactive { port, baud } => {
+
+            let mut buffer = Arc::new(Mutex::new(ConstGenericRingBuffer::<String, BUFFER_SIZE>::new()));
+
+            // println!("Interactive mode");
+            serial::interactive(port, buffer.clone()).await?;
+            // task::spawn_blocking(ui::start(rx)).await.unwrap();
+            ui::start(buffer).await?;
+
+        }
+        Action::Raw { port, baud } => {
+            println!("Raw mode");
         }
     }
 
-    pub fn scrollable(self) -> ScrollView<Self> {
-        ScrollView::new(self)
-            .scroll_y(true)
-            .scroll_x(false)
-            .scroll_strategy(ScrollStrategy::StickToBottom)
-    }
-}
-
-impl<const CAP: usize> View for BufferView<CAP> {
-    fn draw(&self, printer: &Printer<'_, '_>) {
-        let buffer = self.buffer.lock().unwrap();
-        let start = buffer.len().saturating_sub(printer.size.y);
-
-        for y in start..buffer.len() {
-            let line = buffer.get(y as isize).unwrap();
-            printer.print_line(Orientation::Horizontal, (0, y), line.len(), line);
-        }
-    }
-
-    fn required_size(&mut self, constraint: Vec2) -> Vec2 {
-        Vec2::new(constraint.x, self.buffer.lock().unwrap().len())
-    }
-}
-
-fn main() {
-    let mut buffer = ConstGenericRingBuffer::<String, BUFFER_SIZE>::new();
-
-    buffer.push(
-        ansi_term::Colour::Red
-            .bold()
-            .paint("Press CTRL+c to exit.")
-            .to_string(),
-    );
-
-    let mut console = cursive::crossterm().use_custom_theme().install_exit_callback();
-
-    let sbv = BufferView::new(buffer).scrollable();
-    console.add_layer(
-        LinearLayout::vertical()
-            .child(sbv.full_screen())
-            .child(TextView::new("testetesehnte").full_width()),
-    );
-
-    console.run();
-}
-
-pub trait CustomThemeExt {
-    fn use_custom_theme(self) -> CursiveRunnable;
-}
-
-impl CustomThemeExt for CursiveRunnable {
-    fn use_custom_theme(mut self) -> CursiveRunnable {
-        self.set_theme(Theme {
-            shadow: false,
-            borders: cursive::theme::BorderStyle::None,
-            palette: Palette::default().with(|palette| {
-                use cursive::theme::BaseColor::*;
-                use cursive::theme::Color::TerminalDefault;
-                use cursive::theme::PaletteColor::*;
-
-                palette[Background] = TerminalDefault;
-                palette[View] = TerminalDefault;
-                palette[Primary] = White.dark();
-                palette[TitlePrimary] = Blue.light();
-                palette[Secondary] = Blue.light();
-                palette[Highlight] = Blue.dark();
-            }),
-        });
-        self
-    }
-}
-
-pub trait ExitCallbackExt {
-    fn install_exit_callback(self) -> CursiveRunnable;
-}
-
-impl ExitCallbackExt for CursiveRunnable {
-    fn install_exit_callback(mut self) -> CursiveRunnable {
-        self.add_global_callback(Event::CtrlChar('c'), Cursive::quit);
-        self
-    }
+    Ok(())
 }
