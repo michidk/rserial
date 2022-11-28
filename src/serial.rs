@@ -3,8 +3,7 @@ use std::{
     thread,
     time::Duration,
 };
-
-use bytes::Bytes;
+use crate::Bytes;
 use color_eyre::eyre::Result;
 use crossbeam_channel::{select, Receiver, Sender};
 use serialport::SerialPortType;
@@ -125,7 +124,7 @@ pub fn list_ports() -> Result<()> {
 // }
 
 pub fn interactive(port: String, baud_rate: u32, tx: Sender<Bytes>, rx: Receiver<Bytes>) {
-    let port = serialport::new(port, baud_rate)
+    let mut port = serialport::new(port, baud_rate)
         .timeout(Duration::from_millis(10))
         .open()
         .expect("Failed to open serial port.");
@@ -133,22 +132,24 @@ pub fn interactive(port: String, baud_rate: u32, tx: Sender<Bytes>, rx: Receiver
     let mut clone = port.try_clone().expect("Failed to clone");
     thread::spawn(move || {
         // the hack? why does this not working???
-        // let mut bytes = BytesMut::with_capacity(1024);
+        // let mut bytes = BytesMut::with_capacity(256);
+        // bytes.fill(0);
+        let mut bytes = vec![0u8; 256];
 
-        let mut bytes = [0u8; 1024];
-        let mut buf = BufReader::with_capacity(1024, port);
+        // let mut bytes = [0u8; 1024];
+        // let mut buf = BufReader::with_capacity(1024, port);
         loop {
             // read serial port
-            match buf.read(&mut bytes) {
+            match port.read(&mut bytes) {
                 Ok(0) => {
                     // println!("No data");
                     break;
                 }
                 Ok(n) => {
-                    // println!("Read {} bytes", n);
+                    println!("Read {} bytes", n);
                     // let data = bytes.split_to(n);
-                    // sender.send(data.freeze()).unwrap();
-                    tx.send(Bytes::copy_from_slice(&bytes[0..n])).unwrap();
+                    // tx.send(data.freeze()).unwrap();
+                    tx.send(bytes[..n].to_vec()).unwrap();
                 }
                 Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => {}
                 Err(e) => {

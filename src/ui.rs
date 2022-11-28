@@ -1,4 +1,4 @@
-use bytes::Bytes;
+// use bytes::Bytes;
 use color_eyre::eyre::{eyre, Result};
 use crossbeam_channel::{Receiver, Sender};
 use cursive::event::{EventResult, Key};
@@ -19,6 +19,7 @@ use std::borrow::BorrowMut;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::thread;
+use crate::Bytes;
 
 struct BufferView<const CAP: usize> {
     pub buffer: Arc<Mutex<ConstGenericRingBuffer<Bytes, CAP>>>,
@@ -64,8 +65,8 @@ pub fn start(rx: Receiver<Bytes>, tx: Sender<Bytes>) -> Result<()> {
 
     // TODO: apparently the style is lost when transmitting the bytes over a channel
     let text = ansi_term::Colour::Red.bold().paint("Press CTRL+c to exit.");
-    let text = text.as_bytes();
-    buffer.lock().unwrap().push(Bytes::copy_from_slice(text));
+    let text = text.as_bytes().to_vec();
+    buffer.lock().unwrap().push(text);
     let mut console = cursive::crossterm()
         .use_custom_theme()
         .install_exit_callback();
@@ -76,7 +77,7 @@ pub fn start(rx: Receiver<Bytes>, tx: Sender<Bytes>) -> Result<()> {
 
     let mut command_line = EditView::new();
     command_line = command_line.on_submit_mut(move |cursive, text| {
-        let bytes = Bytes::copy_from_slice((format!("{}\n", text)).as_bytes());
+        let bytes = (format!("{}\n", text)).as_bytes().to_vec();
         buffer_clone.clone().lock().unwrap().push(bytes.clone());
         tx.send(bytes).expect("Could not send bytes to channel");
         cursive.call_on_name("command_line", |v: &mut EditView| v.set_content(""));

@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 ansi_term = "0.12.1"
-bytes = "1.2.1"
+# bytes = "1.2.1"
 clap = { version = "4.0.26", features = ["derive"] }
 color-eyre = "0.6.2"
 crossbeam-channel = "0.5.6"

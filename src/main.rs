@@ -1,7 +1,7 @@
 mod ui;
 mod serial;
 
-use bytes::Bytes;
+// use bytes::Bytes;
 use color_eyre::eyre::{Result};
 use clap::{command, Parser, Subcommand};
 use std::{str};
@@ -37,6 +37,7 @@ enum Action {
     }
 }
 
+type Bytes = Vec<u8>;
 
 fn main() -> Result<()> {
     color_eyre::install()?;
