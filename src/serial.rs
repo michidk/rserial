@@ -1,11 +1,11 @@
 use std::{
-    io::{BufReader, Read},
+    io::{Read},
     thread,
     time::Duration,
 };
 use crate::Bytes;
 use color_eyre::eyre::Result;
-use crossbeam_channel::{select, Receiver, Sender};
+use crossbeam_channel::{Receiver, Sender};
 use serialport::SerialPortType;
 
 pub fn list_ports() -> Result<()> {

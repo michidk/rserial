@@ -1,10 +1,10 @@
 // use bytes::Bytes;
-use color_eyre::eyre::{eyre, Result};
+use color_eyre::eyre::{Result};
 use crossbeam_channel::{Receiver, Sender};
 use cursive::event::{EventResult, Key};
 use cursive::traits::With;
 use cursive::view::Nameable;
-use cursive::views::{EditView, ScrollView, TextContent};
+use cursive::views::{EditView, ScrollView};
 use cursive::{
     direction::Orientation,
     event::Event,
@@ -15,8 +15,6 @@ use cursive::{
 };
 use cursive::{CursiveExt, CursiveRunnable};
 use ringbuffer::{ConstGenericRingBuffer, RingBuffer, RingBufferExt, RingBufferWrite};
-use std::borrow::BorrowMut;
-use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use crate::Bytes;
