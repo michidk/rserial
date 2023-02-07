@@ -1,5 +1,8 @@
 set positional-arguments
 
+build:
+    cargo build
+
 run *args='':
     cargo build && sudo ./target/debug/rserial $@
 
@@ -11,3 +14,6 @@ simulate:
 
 simulate-list:
     sudo lsof /dev/ttyS0
+
+clean:
+    cargo clean
