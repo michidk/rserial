@@ -1,7 +1,7 @@
 mod ui;
 mod serial;
 
-// use bytes::Bytes;
+use bytes::Bytes;
 use color_eyre::eyre::{Result};
 use clap::{command, Parser, Subcommand};
 use std::{str};
@@ -37,9 +37,9 @@ enum Action {
     }
 }
 
-type Bytes = Vec<u8>;
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     color_eyre::install()?;
     env_logger::init();
 
@@ -50,14 +50,14 @@ fn main() -> Result<()> {
 
     match args.subcommand {
         Action::List => {
-            serial::list_ports()?;
+            //     serial::list_ports()?;
         }
         Action::Interactive { port, baud } => {
 
             // let mut buffer = Arc::new(Mutex::new(ConstGenericRingBuffer::<String, BUFFER_SIZE>::new()));
 
             println!("Interactive mode");
-            serial::interactive(port, baud, messages_tx, commands_rx);
+            serial::interactive(port, baud, messages_tx, commands_rx).await?;
             ui::start(messages_rx, commands_tx)?;
 
         }

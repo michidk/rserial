@@ -17,7 +17,7 @@ use cursive::{CursiveExt, CursiveRunnable};
 use ringbuffer::{ConstGenericRingBuffer, RingBuffer, RingBufferExt, RingBufferWrite};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use crate::Bytes;
+use bytes::Bytes;
 
 struct BufferView<const CAP: usize> {
     pub buffer: Arc<Mutex<ConstGenericRingBuffer<Bytes, CAP>>>,
@@ -56,14 +56,14 @@ impl<const CAP: usize> View for BufferView<CAP> {
 const BUFFER_SIZE: usize = 64;
 
 pub fn start(rx: Receiver<Bytes>, tx: Sender<Bytes>) -> Result<()> {
-    // RC would be enough here?
+    // TODO: RC would be enough here?
     let buffer = Arc::new(Mutex::new(
         ConstGenericRingBuffer::<Bytes, BUFFER_SIZE>::new(),
     ));
 
     // TODO: apparently the style is lost when transmitting the bytes over a channel
     let text = ansi_term::Colour::Red.bold().paint("Press CTRL+c to exit.");
-    let text = text.as_bytes().to_vec();
+    let text = Bytes::from(text.to_string());
     buffer.lock().unwrap().push(text);
     let mut console = cursive::crossterm()
         .use_custom_theme()
@@ -75,7 +75,7 @@ pub fn start(rx: Receiver<Bytes>, tx: Sender<Bytes>) -> Result<()> {
 
     let mut command_line = EditView::new();
     command_line = command_line.on_submit_mut(move |cursive, text| {
-        let bytes = (format!("{}\n", text)).as_bytes().to_vec();
+        let bytes = Bytes::from(format!("{}\n", text));
         buffer_clone.clone().lock().unwrap().push(bytes.clone());
         tx.send(bytes).expect("Could not send bytes to channel");
         cursive.call_on_name("command_line", |v: &mut EditView| v.set_content(""));
