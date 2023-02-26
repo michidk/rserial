@@ -1,11 +1,14 @@
-mod ui;
-mod serial;
+mod backend;
+mod frontend;
+mod app;
 
+use backend::{file::FileBackend, serial::SerialBackend, Backend};
 use bytes::Bytes;
-use color_eyre::eyre::{Result};
 use clap::{command, Parser, Subcommand};
-use std::{str};
-use crossbeam_channel::{Sender, Receiver};
+use color_eyre::eyre::Result;
+use crossbeam_channel::{Receiver, Sender};
+use std::str;
+use tokio::task;
 
 #[derive(Debug, Parser)]
 struct Args {
@@ -16,27 +19,26 @@ struct Args {
 #[derive(Debug, Subcommand)]
 enum Action {
     /// List the available serial ports
-    #[clap(alias="l")]
+    #[clap(alias = "l")]
     List,
     /// Interactivly open a serial port
-    #[clap(alias="i")]
+    #[clap(alias = "i")]
     Interactive {
         /// The serial port to open
         port: String,
         /// The baud rate to use
-        #[clap(short, long, default_value="9600")]
+        #[clap(short, long, default_value = "9600")]
         baud: u32,
     },
-    #[clap(alias="r")]
+    #[clap(alias = "r")]
     Raw {
         /// The serial port to open
         port: String,
         /// The baud rate to use
-        #[clap(short, long, default_value="9600")]
+        #[clap(short, long, default_value = "9600")]
         baud: u32,
-    }
+    },
 }
-
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -45,26 +47,43 @@ async fn main() -> Result<()> {
 
     let args = Args::parse();
 
-    let (messages_tx, messages_rx): (Sender<Bytes>, Receiver<Bytes>) = crossbeam_channel::unbounded();
-    let (commands_tx, commands_rx): (Sender<Bytes>, Receiver<Bytes>) = crossbeam_channel::unbounded();
+    // task::spawn(async {
+    //     let mut file_backend = FileBackend::new("test.txt")
+    //         .await
+    //         .expect("Could not initialize file backend");
+    //     if let Err(e) = file_backend.start().await {
+    //         println!("Error: {:?}", e);
+    //     }
+    // });
 
-    match args.subcommand {
-        Action::List => {
-            //     serial::list_ports()?;
-        }
-        Action::Interactive { port, baud } => {
+    // task::spawn(async {
+    //     let mut serial_backend =
+    //         SerialBackend::new("COM3".into(), 9600).expect("Could not initialize serial backend");
+    //     if let Err(e) = serial_backend.interactive().await {
+    //         println!("Error: {:?}", e);
+    //     }
+    // });
 
-            // let mut buffer = Arc::new(Mutex::new(ConstGenericRingBuffer::<String, BUFFER_SIZE>::new()));
+    // let (messages_tx, messages_rx): (Sender<Bytes>, Receiver<Bytes>) = crossbeam_channel::unbounded();
+    // let (commands_tx, commands_rx): (Sender<Bytes>, Receiver<Bytes>) = crossbeam_channel::unbounded();
 
-            println!("Interactive mode");
-            serial::interactive(port, baud, messages_tx, commands_rx).await?;
-            ui::start(messages_rx, commands_tx)?;
+    // match args.subcommand {
+    //     Action::List => {
+    //         //     serial::list_ports()?;
+    //     }
+    //     Action::Interactive { port, baud } => {
 
-        }
-        Action::Raw { port, baud } => {
-            println!("Raw mode");
-        }
-    }
+    //         // let mut buffer = Arc::new(Mutex::new(ConstGenericRingBuffer::<String, BUFFER_SIZE>::new()));
+
+    //         println!("Interactive mode");
+    //         serial::interactive(port, baud, messages_tx, commands_rx).await?;
+    //         ui::start(messages_rx, commands_tx)?;
+
+    //     }
+    //     Action::Raw { port, baud } => {
+    //         println!("Raw mode");
+    //     }
+    // }
 
     Ok(())
 }

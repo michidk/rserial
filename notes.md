@@ -14,7 +14,5 @@ https://github.com/dhylands/serial-monitor
 https://github.com/serialport/serialport-rs
 
 # current state
-- also try out async again
-    last async attempt: https://github.com/michidk/rserial/blob/021e453f748759f8ee1eef72fc8d892618ad5f8d/src/serial.rs
 - non utf8 characters (like new line) crash everything
 - rename to cereal

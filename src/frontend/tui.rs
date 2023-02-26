@@ -1,5 +1,6 @@
 // use bytes::Bytes;
-use color_eyre::eyre::{Result};
+use bytes::Bytes;
+use color_eyre::eyre::Result;
 use crossbeam_channel::{Receiver, Sender};
 use cursive::event::{EventResult, Key};
 use cursive::traits::With;
@@ -17,7 +18,6 @@ use cursive::{CursiveExt, CursiveRunnable};
 use ringbuffer::{ConstGenericRingBuffer, RingBuffer, RingBufferExt, RingBufferWrite};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use bytes::Bytes;
 
 struct BufferView<const CAP: usize> {
     pub buffer: Arc<Mutex<ConstGenericRingBuffer<Bytes, CAP>>>,
@@ -44,6 +44,7 @@ impl<const CAP: usize> View for BufferView<CAP> {
         for y in start..buffer.len() {
             let line = buffer.get(y as isize).unwrap();
             let line = std::str::from_utf8(line).unwrap();
+            // check last few characters for valid utf8 characters with unicode-width? if not don't render it
             printer.print_line(Orientation::Horizontal, (0, y), line.len(), line);
         }
     }

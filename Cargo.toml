@@ -3,10 +3,9 @@ name = "rserial"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
 ansi_term = "0.12.1"
+async-fs = "1.6.0"
 bytes = "1.4.0"
 clap = { version = "4.0.26", features = ["derive"] }
 color-eyre = "0.6.2"
@@ -21,9 +20,8 @@ mio-serial = "5.0.4"
 ringbuffer = "0.12.0"
 serialport = "4.2.0"
 term_size = { version = "0.3.2", default-features = false }
-# strum = { version = "0.24.1", features = ["derive"] }
 thiserror = "1.0.37"
-tokio = { version = "1.25.0", features = ["macros", "rt-multi-thread", "io-util"] }
+tokio = { version = "1.25.0", features = ["macros", "rt-multi-thread", "io-util", "time"] }
 tokio-serial = { version = "5.4.4", features = ["libudev"] }
 tokio-util = { version = "0.7.4", features = ["codec"] }
 unicode-width = "0.1.10"
